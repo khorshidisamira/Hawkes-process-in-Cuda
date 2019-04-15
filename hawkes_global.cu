@@ -12,17 +12,17 @@
 // includes, project
 using namespace std;
 
-bool run(float *host_samples);
-static void CheckCudaError(const char *, unsigned, const char *, cudaError_t);
-
-/* prototype for ERROR handling */
-#define CUDA_CHECK_RETURN(value) CheckCudaError (__FILE__,__LINE__, #value, value)
-
 const int DATA_SIZE = 1;
 const int DB_SIZE = 25;
 
 const char* OUTPUT = "outputTimes.txt";
 const char* FILENAME = "LockeLowell.csv";
+
+bool run(float *host_samples);
+static void CheckCudaError(const char *, unsigned, const char *, cudaError_t);
+
+/* prototype for ERROR handling */
+#define CUDA_CHECK_RETURN(value) CheckCudaError (__FILE__,__LINE__, #value, value)
 
 /*
 * Check the return value of the CUDA runtime API call and exit the application if the call has failed
@@ -49,7 +49,7 @@ __global__ void pjiCalculator(float *data, unsigned int dbsize) {
 	int col = blockDim.y*blockIdx.y + threadIdx.y;
 	int dimx = blockDim.x*gridDim.x;
 	int gtid = col*dimx + row;
-	 
+
 	int ii = 0;
 	for (int k = 0; k <= gtid; k++) {
 		ii = k*dbsize + gtid;
@@ -57,25 +57,26 @@ __global__ void pjiCalculator(float *data, unsigned int dbsize) {
 		data[ii] = 0.0f;
 	}
 
-	int id = 0; 
+	int id = 0;
 	for (int j = gtid + 1; j < dbsize; j++) {
-		id = j*dbsize + gtid; 
+		id = j*dbsize + gtid;
 		data[id] = 2.0f; // for test!
-	} 
+	}
 }
 
-
-
-__device__ void col_sum(float * arr, float * res, unsigned int gindex, unsigned int db_size){
+__device__ void col_sum(float * arr, float * res, unsigned int gindex, unsigned int db_size) {
 	int id = 0;
 	//int size = db_size - gindex - 1;
-	float *column_elements;
+	float *column_elements = new float[DB_SIZE];
+	for (int j = 0 ; j < (gindex+1); j++) {
+		column_elements[id] = 0.0f;
+	}
 	for (int j = gindex + 1; j < db_size; j++) {
 		id = j*db_size + gindex;
 		column_elements[id] = arr[id];
 	}
+	printf("INSIDE COL_SUM\n");
 	atomicAdd(res, *column_elements);
-
 }
 
 __global__ void k0Kernel(float *data, float *result, unsigned int dbsize) {
@@ -84,23 +85,24 @@ __global__ void k0Kernel(float *data, float *result, unsigned int dbsize) {
 	int dimx = blockDim.x*gridDim.x;
 	int gtid = iy*dimx + ix;
 
-	printf("GTID: %d,\n", gtid);
+	printf("GTID: %d\n", gtid);
 
-	float * partial_result;
+	float * partial_result = new float[DB_SIZE];
 	col_sum(data, &(partial_result[gtid]), gtid, dbsize);
+	printf("AFTER COLSUM, %d\n", gtid);
 	__syncthreads();
-	if(gtid == 0) {
+	if (gtid == 0) {
 		atomicAdd(result, *partial_result);//sum(pji)
-		float s = *result; 
-		printf("TOTAL SUM iS:%f", s); 
-	} 
+		float s = *result;
+		printf("TOTAL SUM iS:%f\n", s);
+	}
 }
 
 float summation(float *arr, int size) {
 	float sum_val = 0.0f;
 	for (int h = 0; h < size; h++) {
-		for (int w = 0; w < size; w++){
-			sum_val += arr[DB_SIZE * h + w] ;
+		for (int w = 0; w < size; w++) {
+			sum_val += arr[DB_SIZE * h + w];
 		}
 	}
 	return sum_val;
@@ -113,6 +115,7 @@ void test_k0Kernel(float *h_data, int DB_SIZE, float k0_h_result) {
 	assert(direct_return == k0_h_result);
 	assert(ret_val != nullptr);
 }
+
 
 bool run(float *host_samples) {
 	float *h_data = new float[DB_SIZE*DB_SIZE];
@@ -128,7 +131,6 @@ bool run(float *host_samples) {
 			}
 	}
 
-
 	//THESE ARE NOT OPTIMIZED(lower triangular is used only)
 	CUDA_CHECK_RETURN(cudaMalloc((void**)&d_data, DB_SIZE * DB_SIZE * sizeof(float)));
 
@@ -139,9 +141,6 @@ bool run(float *host_samples) {
 	dim3 gridDim(1, 1, 1);
 	dim3 blkDim(5, 5, 1);
 
-	//while ((mu_diff > threshold) || (k0_diff > threshold) || (w_diff > threshold)) {
-	// Copying back the results from GPU
-	
 	float *k0_d_result = NULL;
 	float k0_h_result = 0.0f;
 	CUDA_CHECK_RETURN(cudaMalloc((void**)&k0_d_result, sizeof(float)));
@@ -149,22 +148,22 @@ bool run(float *host_samples) {
 
 	/////////////////////////////E step///////////////////////////////// 
 	pjiCalculator << <gridDim, blkDim >> > (d_data, DB_SIZE);
-	CUDA_CHECK_RETURN(cudaMemcpy(&h_data, d_data, DB_SIZE * DB_SIZE * sizeof(float), cudaMemcpyDeviceToHost));
-
+	CUDA_CHECK_RETURN(cudaMemcpy(h_data, d_data, DB_SIZE * DB_SIZE * sizeof(float), cudaMemcpyDeviceToHost));
+	printf("after PJIKERNEL!!!!");
 	k0Kernel << <gridDim, blkDim >> > (d_data, k0_d_result, DB_SIZE);
 	CUDA_CHECK_RETURN(cudaMemcpy(&k0_h_result, k0_d_result, sizeof(float), cudaMemcpyDeviceToHost));
-	
-	
+
+
 	test_k0Kernel(h_data, DB_SIZE, k0_h_result);
 
 	cudaThreadExit();
 	//pjjCalculator << <blockCounts, threadCounts >> > (d_data, DB_SIZE, mu_v, k0_v, w_v);
 
 	/////////////////////////////M step/////////////////////////////////
- 
+
 	//} 
- 
-	 
+
+
 
 	// cleanup
 
