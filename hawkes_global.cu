@@ -75,8 +75,16 @@ __device__ void col_sum(float * arr, float * res, unsigned int gindex, unsigned 
 		id = j*db_size + gindex;
 		column_elements[id] = arr[id];
 	}
-	printf("INSIDE COL_SUM\n");
+	
+	if (gindex == 0) {
+
+		for (int j = 0; j < db_size; j++) {
+			id = j*db_size + gindex;
+			printf("col, %f\n", column_elements[id]);
+		}
+	}
 	atomicAdd(res, *column_elements);
+	printf("INSIDE COL_SUM, %f\n", res);
 }
 
 __global__ void k0Kernel(float *data, float *result, unsigned int dbsize) {
